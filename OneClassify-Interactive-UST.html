@@ -1,0 +1,1569 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>OneClassify · Field-Level Data Classification · UST</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+/* =============================================
+   DESIGN TOKENS
+   ============================================= */
+:root {
+  --teal: #006E74;
+  --teal-accent: #0097AC;
+  --teal-dark: #004F54;
+  --teal-light: #9FD3DC;
+  --navy: #231F20;
+  --navy-muted: #4A4548;
+  --navy-subtle: #7B7679;
+  --oat: #F2F6F7;
+  --white: #FFFFFF;
+  --red: #CC2427;
+  --green: #008140;
+  --page-bg: #12151E;
+  --panel-w: 340px;
+  --panel-h: 680px;
+  --transition: 600ms cubic-bezier(0.4, 0, 0.2, 1);
+  --font: 'Inter', 'Aptos', -apple-system, sans-serif;
+}
+
+/* =============================================
+   RESET & BASE
+   ============================================= */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  height: 100%;
+  font-family: var(--font);
+  background: var(--page-bg);
+  color: var(--white);
+  overflow: auto;
+}
+
+/* =============================================
+   PAGE LAYOUT
+   ============================================= */
+.page {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  width: 100%;
+  padding: 20px 20px 80px;
+  gap: 24px;
+  box-sizing: border-box;
+}
+
+/* =============================================
+   STAGE — perspective container (see also scale-wrap section below)
+   ============================================= */
+
+/* =============================================
+   SPREAD WRAPPERS
+   ============================================= */
+.spread {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: var(--panel-h);
+  display: flex;
+  transform-style: preserve-3d;
+  transition: opacity var(--transition), transform var(--transition);
+}
+
+/* Outside spread: panels A + B + C */
+#spread-outside {
+  opacity: 1;
+  transform: scale(1) translateY(0);
+  pointer-events: auto;
+}
+#spread-outside.hidden {
+  opacity: 0;
+  transform: scale(0.93) translateY(6px);
+  pointer-events: none;
+}
+
+/* Inside spread: panels D + E + F */
+#spread-inside {
+  opacity: 0;
+  transform: scale(0.93) translateY(6px);
+  pointer-events: none;
+}
+#spread-inside.visible {
+  opacity: 1;
+  transform: scale(1) translateY(0);
+  pointer-events: auto;
+}
+
+/* =============================================
+   INDIVIDUAL PANELS
+   ============================================= */
+.panel {
+  position: absolute;
+  width: var(--panel-w);
+  height: var(--panel-h);
+  top: 0;
+  overflow: hidden;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+  border-radius: 2px;
+  box-shadow:
+    0 4px 6px rgba(0,0,0,0.3),
+    0 10px 40px rgba(0,0,0,0.4),
+    inset 0 0 0 1px rgba(255,255,255,0.06);
+}
+
+/* Panel positions & 3D fold setup */
+#panel-c {
+  left: 0; z-index: 3;
+  transition: left var(--transition), box-shadow var(--transition);
+}
+#panel-b {
+  left: 0; z-index: 2;
+  transform-origin: right center;
+  transform: perspective(1200px) rotateY(180deg);
+  transition: left var(--transition), transform var(--transition), box-shadow var(--transition);
+}
+#panel-a {
+  left: 0; z-index: 2;
+  transform-origin: left center;
+  transform: perspective(1200px) rotateY(-180deg);
+  transition: left var(--transition), transform var(--transition), box-shadow var(--transition);
+}
+
+/* State 0: Closed — only C */
+.state-0 #spread-outside { width: var(--panel-w); }
+.state-0 #panel-c { left: 0; box-shadow: 0 8px 60px rgba(0,110,116,0.35), 0 2px 12px rgba(0,0,0,0.5); }
+.state-0 #panel-b { left: 0; transform: perspective(1200px) rotateY(180deg); }
+.state-0 #panel-a { left: 0; transform: perspective(1200px) rotateY(-180deg); }
+
+/* State 1: B swings out to the left — hinged at right edge of B = left edge of C */
+.state-1 .stage { width: calc(var(--panel-w) * 2); }
+.state-1 #spread-outside { width: calc(var(--panel-w) * 2); }
+.state-1 #panel-c { left: var(--panel-w); }
+.state-1 #panel-b { left: 0; transform: perspective(1200px) rotateY(0deg); box-shadow: -4px 0 20px rgba(0,0,0,0.25); }
+.state-1 #panel-a { left: var(--panel-w); transform: perspective(1200px) rotateY(-180deg); }
+
+/* State 2: A swings out to the right — hinged at left edge of A = right edge of C */
+.state-2 .stage { width: calc(var(--panel-w) * 3); }
+.state-2 #spread-outside { width: calc(var(--panel-w) * 3); }
+.state-2 #panel-c { left: var(--panel-w); }
+.state-2 #panel-b { left: 0; transform: perspective(1200px) rotateY(0deg); box-shadow: -4px 0 20px rgba(0,0,0,0.25); }
+.state-2 #panel-a { left: calc(var(--panel-w) * 2); transform: perspective(1200px) rotateY(0deg); box-shadow: 4px 0 20px rgba(0,0,0,0.25); }
+
+/* State 3: Inside spread */
+.state-3 .stage { width: calc(var(--panel-w) * 3); }
+.state-3 #spread-outside.hidden { pointer-events: none; }
+.state-3 #spread-inside { width: calc(var(--panel-w) * 3); }
+
+/* Inside spread panels */
+#panel-d { left: 0; }
+#panel-e { left: var(--panel-w); }
+#panel-f { left: calc(var(--panel-w) * 2); }
+
+/* =============================================
+   PANEL THEMES
+   ============================================= */
+
+/* Panel C — Front Cover */
+#panel-c {
+  background: linear-gradient(160deg, var(--teal-dark) 0%, var(--teal) 45%, var(--teal-accent) 100%);
+  display: flex;
+  flex-direction: column;
+  padding: 28px 24px 22px;
+  cursor: pointer;
+}
+
+/* Panel B — Back Cover */
+#panel-b {
+  background: var(--oat);
+  color: var(--navy);
+  display: flex;
+  flex-direction: column;
+  padding: 28px 24px 0;
+}
+
+/* Panel A — Inside Flap */
+#panel-a {
+  background: var(--navy);
+  color: var(--white);
+  display: flex;
+  flex-direction: column;
+  padding: 28px 24px;
+}
+
+/* Panel D — Problem & Solution */
+#panel-d {
+  background: var(--white);
+  color: var(--navy);
+  display: flex;
+  flex-direction: column;
+  padding: 24px 20px;
+  overflow-y: auto;
+}
+
+/* Panel E — How It Works */
+#panel-e {
+  background: var(--oat);
+  color: var(--navy);
+  display: flex;
+  flex-direction: column;
+  padding: 24px 20px;
+  overflow-y: auto;
+}
+
+/* Panel F — Results & Roadmap */
+#panel-f {
+  background: var(--white);
+  color: var(--navy);
+  display: flex;
+  flex-direction: column;
+  padding: 24px 20px;
+  overflow-y: auto;
+}
+
+/* =============================================
+   TYPOGRAPHY WITHIN PANELS (base 10px)
+   ============================================= */
+.eyebrow {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--teal-accent);
+  margin-bottom: 6px;
+}
+.panel-headline {
+  font-size: 14px;
+  font-weight: 800;
+  line-height: 1.25;
+  margin-bottom: 8px;
+}
+.panel-body {
+  font-size: 9.5px;
+  line-height: 1.55;
+  color: var(--navy-muted);
+}
+
+/* Cover-specific */
+#panel-c .eyebrow { color: rgba(255,255,255,0.7); }
+#panel-c .panel-headline { color: var(--white); font-size: 18px; }
+#panel-c .panel-body { color: rgba(255,255,255,0.82); }
+
+/* =============================================
+   PANEL C — FRONT COVER INTERNALS
+   ============================================= */
+.cover-logos {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: auto;
+}
+.cover-logo-ust svg {
+  height: 22px;
+  width: auto;
+  display: block;
+}
+.cover-logo-divider {
+  width: 1px;
+  height: 22px;
+  background: rgba(255,255,255,0.35);
+}
+.cover-kpis {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: rgba(255,255,255,0.1);
+  border: 1px solid rgba(255,255,255,0.18);
+  border-radius: 12px;
+  padding: 14px 18px;
+}
+.cover-kpi {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  flex: 1;
+}
+.cover-kpi-v {
+  font-size: 20px;
+  font-weight: 800;
+  color: var(--white);
+  line-height: 1;
+}
+.cover-kpi-l {
+  font-size: 8px;
+  color: rgba(255,255,255,0.6);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  text-align: center;
+}
+.cover-kpi-sep {
+  width: 1px;
+  height: 32px;
+  background: rgba(255,255,255,0.2);
+}
+  margin-bottom: 14px;
+}
+.cover-supertitle {
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: rgba(255,255,255,0.65);
+  margin-bottom: 4px;
+}
+.cover-product-name {
+  font-size: 28px;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  color: var(--white);
+  line-height: 1;
+  margin-bottom: 10px;
+}
+.cover-tagline {
+  font-size: 11px;
+  font-weight: 400;
+  color: rgba(255,255,255,0.75);
+  font-style: italic;
+  margin-bottom: 4px;
+}
+.cover-desc {
+  font-size: 9px;
+  line-height: 1.6;
+  color: rgba(255,255,255,0.78);
+  border-left: 2px solid rgba(255,255,255,0.3);
+  padding-left: 10px;
+  margin-bottom: 16px;
+}
+.cover-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255,255,255,0.2);
+}
+.cover-footer-left {
+  font-size: 8.5px;
+  color: rgba(255,255,255,0.6);
+}
+.cover-ready-badge {
+  background: rgba(255,255,255,0.15);
+  border: 1px solid rgba(255,255,255,0.35);
+  border-radius: 20px;
+  padding: 3px 10px;
+  font-size: 8px;
+  font-weight: 700;
+  color: var(--white);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.cover-pulse {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  margin-top: 10px;
+  font-size: 8.5px;
+  color: rgba(255,255,255,0.5);
+  animation: pulse-hint 2s ease-in-out infinite;
+}
+.cover-pulse svg { opacity: 0.6; width: 14px; height: 14px; flex-shrink: 0; }
+@keyframes pulse-hint {
+  0%, 100% { opacity: 0.5; transform: translateX(0); }
+  50% { opacity: 1; transform: translateX(3px); }
+}
+
+/* =============================================
+   PANEL B — BACK COVER INTERNALS
+   ============================================= */
+.back-eyebrow { color: var(--teal-accent); }
+.back-headline {
+  font-size: 16px;
+  font-weight: 800;
+  color: var(--navy);
+  line-height: 1.2;
+  margin-bottom: 8px;
+}
+.back-body {
+  font-size: 9px;
+  color: var(--navy-muted);
+  line-height: 1.55;
+  margin-bottom: 12px;
+}
+.framework-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin-bottom: 14px;
+}
+.framework-list li {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 9px;
+  font-weight: 500;
+  color: var(--navy-muted);
+}
+.framework-list li::before {
+  content: '';
+  display: block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--teal);
+  flex-shrink: 0;
+}
+.back-footer {
+  margin-top: auto;
+  border-top: 2px solid var(--teal);
+  padding: 10px 0 8px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.back-footer-left {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.back-footer-brand {
+  font-size: 11px;
+  font-weight: 800;
+  color: var(--navy);
+}
+.back-footer-sub {
+  font-size: 7.5px;
+  color: var(--navy-subtle);
+}
+.back-footer-logo svg {
+  height: 22px;
+  width: auto;
+  display: block;
+}
+.disclaimer-band {
+  background: var(--navy);
+  padding: 8px 24px;
+  text-align: center;
+}
+.disclaimer-band p {
+  font-size: 7px;
+  color: rgba(255,255,255,0.55);
+  line-height: 1.5;
+}
+.disclaimer-band p:first-child {
+  font-weight: 700;
+  color: rgba(255,255,255,0.75);
+  margin-bottom: 2px;
+}
+
+/* =============================================
+   PANEL A — INSIDE FLAP INTERNALS
+   ============================================= */
+.flap-eyebrow { color: var(--teal-accent); }
+.flap-title {
+  font-size: 13px;
+  font-weight: 800;
+  color: var(--white);
+  line-height: 1.25;
+  margin-bottom: 8px;
+}
+.flap-body {
+  font-size: 9px;
+  color: rgba(255,255,255,0.72);
+  line-height: 1.55;
+  margin-bottom: 18px;
+}
+.stats-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.stat-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding-left: 10px;
+  border-left: 2px solid var(--teal-accent);
+}
+.stat-value {
+  font-size: 20px;
+  font-weight: 800;
+  color: var(--white);
+  line-height: 1;
+  min-width: 52px;
+  flex-shrink: 0;
+}
+.stat-label {
+  font-size: 8.5px;
+  color: var(--teal-light);
+  line-height: 1.35;
+  padding-top: 3px;
+}
+
+/* =============================================
+   PANEL D — PROBLEM & SOLUTION INTERNALS
+   ============================================= */
+.d-eyebrow { color: var(--teal-accent); }
+.d-headline { color: var(--navy); font-size: 13px; }
+
+.problem-block, .solution-block {
+  background: var(--oat);
+  border-radius: 4px;
+  padding: 9px 11px;
+  margin-bottom: 7px;
+  border-left: 3px solid var(--red);
+}
+.solution-block { border-left-color: var(--teal); }
+.block-label {
+  font-size: 8px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--red);
+  margin-bottom: 3px;
+}
+.solution-block .block-label { color: var(--teal); }
+.block-text {
+  font-size: 8.5px;
+  line-height: 1.5;
+  color: var(--navy-muted);
+}
+.value-list {
+  list-style: none;
+  margin-top: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.value-list li {
+  font-size: 8.5px;
+  color: var(--navy-muted);
+  line-height: 1.4;
+  padding-left: 13px;
+  position: relative;
+}
+.value-list li::before {
+  content: '•';
+  position: absolute;
+  left: 0;
+  color: var(--teal);
+  font-weight: 700;
+}
+.value-list li strong {
+  color: var(--navy);
+  font-weight: 600;
+}
+
+/* =============================================
+   PANEL E — HOW IT WORKS INTERNALS
+   ============================================= */
+.e-eyebrow { color: var(--teal-accent); }
+.e-headline { color: var(--navy); font-size: 13px; }
+
+.classifier-list {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin-bottom: 6px;
+}
+.classifier-card {
+  background: var(--white);
+  border-left: 3px solid var(--teal);
+  border-radius: 3px;
+  padding: 7px 10px;
+}
+.classifier-name {
+  font-size: 9.5px;
+  font-weight: 700;
+  color: var(--teal-dark);
+  margin-bottom: 1px;
+}
+.classifier-desc {
+  font-size: 8px;
+  color: var(--navy-muted);
+  line-height: 1.45;
+}
+.flow-arrow {
+  text-align: center;
+  font-size: 14px;
+  color: var(--teal-accent);
+  margin: 2px 0;
+  line-height: 1;
+}
+.tally-block {
+  background: var(--navy);
+  border-radius: 4px;
+  padding: 8px 11px;
+  margin-bottom: 4px;
+}
+.tally-title {
+  font-size: 9.5px;
+  font-weight: 800;
+  color: var(--white);
+  margin-bottom: 2px;
+}
+.tally-desc {
+  font-size: 8px;
+  color: rgba(255,255,255,0.65);
+  line-height: 1.45;
+}
+.output-block {
+  background: var(--teal);
+  border-radius: 4px;
+  padding: 7px 11px;
+  margin-bottom: 6px;
+}
+.output-title {
+  font-size: 9.5px;
+  font-weight: 800;
+  color: var(--white);
+  margin-bottom: 2px;
+}
+.output-cats {
+  font-size: 8px;
+  color: rgba(255,255,255,0.82);
+}
+.callout-box {
+  border: 1.5px solid var(--teal-accent);
+  border-radius: 4px;
+  padding: 8px 10px;
+  background: var(--white);
+}
+.callout-title {
+  font-size: 9px;
+  font-weight: 700;
+  color: var(--teal-accent);
+  margin-bottom: 3px;
+}
+.callout-text {
+  font-size: 7.5px;
+  color: var(--navy-muted);
+  line-height: 1.5;
+}
+
+/* =============================================
+   PANEL F — RESULTS & ROADMAP INTERNALS
+   ============================================= */
+.f-eyebrow { color: var(--teal-accent); }
+.f-headline { color: var(--navy); font-size: 13px; }
+
+.metric-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 8px;
+}
+.metric-table tr {
+  border-bottom: 1px solid #e8eef0;
+}
+.metric-table tr:last-child { border-bottom: none; }
+.metric-table td {
+  padding: 4px 0;
+  font-size: 8.5px;
+}
+.metric-table td:first-child {
+  color: var(--navy-muted);
+}
+.metric-table td:last-child {
+  color: var(--teal);
+  font-weight: 700;
+  text-align: right;
+}
+.accelerator-block {
+  background: var(--oat);
+  border-left: 3px solid var(--teal-accent);
+  border-radius: 3px;
+  padding: 8px 10px;
+  margin-bottom: 8px;
+}
+.accel-title {
+  font-size: 9.5px;
+  font-weight: 700;
+  color: var(--navy);
+  margin-bottom: 3px;
+}
+.accel-text {
+  font-size: 8px;
+  color: var(--navy-muted);
+  line-height: 1.5;
+  margin-bottom: 5px;
+}
+.accel-flow {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+.accel-step {
+  background: var(--teal);
+  color: var(--white);
+  border-radius: 3px;
+  padding: 2px 6px;
+  font-size: 7.5px;
+  font-weight: 700;
+}
+.accel-arrow {
+  color: var(--teal-accent);
+  font-size: 10px;
+}
+.roadmap-list {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin-bottom: 8px;
+}
+.roadmap-item {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+}
+.roadmap-num {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--teal);
+  color: var(--white);
+  font-size: 8px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+.roadmap-content {
+  flex: 1;
+}
+.roadmap-item-title {
+  font-size: 8.5px;
+  font-weight: 700;
+  color: var(--navy);
+  margin-bottom: 1px;
+}
+.roadmap-item-desc {
+  font-size: 7.5px;
+  color: var(--navy-muted);
+  line-height: 1.4;
+}
+.f-disclaimer {
+  font-size: 7px;
+  color: var(--navy-subtle);
+  border-top: 1px solid #e0e8ea;
+  padding-top: 6px;
+  margin-top: auto;
+  line-height: 1.5;
+}
+
+/* =============================================
+   PANEL FOLD LINE
+   ============================================= */
+.fold-line {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 1px;
+  height: 100%;
+  background: linear-gradient(to bottom, transparent, rgba(0,0,0,0.12) 20%, rgba(0,0,0,0.18) 50%, rgba(0,0,0,0.12) 80%, transparent);
+  z-index: 10;
+  pointer-events: none;
+}
+
+/* =============================================
+   STEP DOTS
+   ============================================= */
+.step-dots {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: rgba(255,255,255,0.25);
+  transition: all 300ms ease;
+  cursor: pointer;
+}
+.dot.active {
+  background: var(--white);
+  transform: scale(1.25);
+}
+.dot-label {
+  font-size: 9px;
+  color: rgba(255,255,255,0.4);
+  margin-left: 4px;
+  transition: color 300ms ease;
+}
+
+/* =============================================
+   NAV BAR
+   ============================================= */
+.nav-bar {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 32px 18px;
+  background: linear-gradient(to top, rgba(18,21,30,0.98), rgba(18,21,30,0.7));
+  backdrop-filter: blur(8px);
+}
+.nav-hint {
+  font-size: 9px;
+  color: rgba(255,255,255,0.3);
+  letter-spacing: 0.06em;
+}
+.btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 18px;
+  border-radius: 24px;
+  font-family: var(--font);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  border: none;
+  transition: all 200ms ease;
+  letter-spacing: 0.02em;
+}
+.btn-primary {
+  background: var(--teal);
+  color: var(--white);
+}
+.btn-primary:hover { background: var(--teal-accent); transform: translateY(-1px); }
+.btn-ghost {
+  background: rgba(255,255,255,0.08);
+  color: rgba(255,255,255,0.7);
+  border: 1px solid rgba(255,255,255,0.15);
+}
+.btn-ghost:hover { background: rgba(255,255,255,0.14); color: var(--white); }
+.btn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+  transform: none !important;
+}
+.btn svg { width: 14px; height: 14px; }
+
+/* =============================================
+   BROCHURE LABEL
+   ============================================= */
+.brochure-label {
+  font-size: 9px;
+  color: rgba(255,255,255,0.2);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  margin-bottom: -8px;
+}
+
+/* =============================================
+   RESPONSIVE
+   ============================================= */
+.desktop-only { display: block; }
+.mobile-msg {
+  display: none;
+  text-align: center;
+  padding: 40px 24px;
+  max-width: 320px;
+}
+.mobile-msg h2 { font-size: 18px; margin-bottom: 8px; }
+.mobile-msg p { font-size: 12px; color: rgba(255,255,255,0.6); }
+
+@media (max-width: 480px) {
+  .desktop-only { display: none !important; }
+  .mobile-msg { display: block !important; }
+  body { overflow: auto; }
+}
+
+/* =============================================
+   SCALE WRAPPER — absorbs scaled dimensions
+   ============================================= */
+#scale-wrap {
+  position: relative;
+  display: flex;
+  justify-content: center;
+  /* width/height set by JS to match post-scale size */
+  flex-shrink: 0;
+}
+
+.stage {
+  perspective: 1800px;
+  perspective-origin: center center;
+  position: relative;
+  width: var(--panel-w);
+  height: var(--panel-h);
+  transition: width var(--transition);
+  transform-origin: top center;
+  flex-shrink: 0;
+}
+#spread-inside .panel {
+  box-shadow:
+    0 4px 6px rgba(0,0,0,0.18),
+    0 10px 30px rgba(0,0,0,0.25);
+}
+
+/* Scrollbar styling for panels */
+.panel::-webkit-scrollbar { width: 3px; }
+.panel::-webkit-scrollbar-track { background: transparent; }
+.panel::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.15); border-radius: 2px; }
+
+/* Section divider */
+.section-spacer { height: 8px; }
+
+/* OC Mark */
+.oc-mark {
+  width: 44px;
+  height: 44px;
+  border-radius: 22%;
+  background: linear-gradient(135deg, rgba(255,255,255,0.18), rgba(255,255,255,0.07));
+  border: 2px solid rgba(255,255,255,0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 800;
+  font-size: 16px;
+  color: #fff;
+  letter-spacing: -1px;
+  flex-shrink: 0;
+}
+
+/* =============================================
+   PRINT / PDF — static trifold layout
+   ============================================= */
+@media print {
+  @page { size: A4 landscape; margin: 0; }
+
+  /* Kill interactive chrome */
+  html, body {
+    background: white !important;
+    overflow: visible !important;
+    height: auto !important;
+    color: var(--navy) !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  .nav-bar,
+  .step-dots,
+  .brochure-label,
+  .mobile-msg,
+  .cover-pulse,
+  .fold-line { display: none !important; }
+
+  /* Hide interactive stage, show print layout */
+  .page.desktop-only { display: none !important; }
+  #print-root { display: block !important; }
+
+  /* Page container — two A4 landscape pages */
+  .page {
+    display: block !important;
+    min-height: 0 !important;
+    padding: 0 !important;
+    gap: 0 !important;
+    background: white !important;
+  }
+
+  /* Each print-page is a 297×210mm strip of three panels */
+  .print-page {
+    display: grid !important;
+    grid-template-columns: 99mm 99mm 99mm !important;
+    width: 297mm !important;
+    height: 210mm !important;
+    page-break-after: always !important;
+    overflow: hidden !important;
+    position: relative !important;
+  }
+  .print-page:last-of-type { page-break-after: auto !important; }
+
+  /* Reset ALL stage/spread/panel interactive positioning */
+  .stage, .spread, #spread-outside, #spread-inside { all: unset !important; }
+  .panel {
+    position: static !important;
+    width: 99mm !important;
+    height: 210mm !important;
+    overflow: hidden !important;
+    display: flex !important;
+    flex-direction: column !important;
+    padding: 9mm 8mm !important;
+    box-shadow: none !important;
+    border-radius: 0 !important;
+    opacity: 1 !important;
+    transform: none !important;
+    backface-visibility: visible !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  /* Force SVG colours to print correctly */
+  .panel svg { overflow: visible !important; }
+  .panel svg path { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+  [data-panel="c"] svg path { fill: #FFFFFF !important; }
+  [data-panel="b"] .back-footer-logo svg path { fill: #231F20 !important; }
+  [data-panel="a"] svg path { fill: #FFFFFF !important; }
+
+  /* OC mark on cover */
+  .oc-mark {
+    background: linear-gradient(135deg, rgba(255,255,255,0.18), rgba(255,255,255,0.07)) !important;
+    border: 2px solid rgba(255,255,255,0.5) !important;
+    color: #fff !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  /* Panel backgrounds for print — use data-panel attr since clones don't have IDs */
+  [data-panel="c"] { background: linear-gradient(160deg, var(--teal-dark) 0%, var(--teal) 45%, var(--teal-accent) 100%) !important; }
+  [data-panel="b"] { background: var(--oat) !important; color: var(--navy) !important; }
+  [data-panel="a"] { background: var(--navy) !important; color: white !important; }
+  [data-panel="d"] { background: white !important; color: var(--navy) !important; }
+  [data-panel="e"] { background: var(--oat) !important; color: var(--navy) !important; }
+  [data-panel="f"] { background: white !important; color: var(--navy) !important; }
+
+  /* Fold shadow lines */
+  [data-panel="a"]::after, [data-panel="b"]::after {
+    content: '' !important;
+    position: absolute !important;
+    top: 0 !important; right: 0 !important; bottom: 0 !important;
+    width: 1px !important;
+    background: rgba(0,0,0,0.12) !important;
+    pointer-events: none !important;
+  }
+
+  /* Print font sizes — match static brochure */
+  .eyebrow { font-size: 7.5pt !important; margin-bottom: 2.5mm !important; }
+  .panel-headline, .cover-product-name { font-size: 13pt !important; }
+  .panel-body, .back-body, .flap-body, .block-text, .callout-text,
+  .classifier-desc, .tally-desc, .output-cats, .accel-text,
+  .roadmap-item-desc, .metric-table td, .value-list li { font-size: 7.5pt !important; }
+  .back-headline, .flap-title { font-size: 12pt !important; }
+  .stat-value { font-size: 18pt !important; }
+  .cover-product-name { font-size: 20pt !important; }
+  .cover-tagline { font-size: 9pt !important; }
+  .cover-desc { font-size: 7.5pt !important; }
+
+  /* Disclaimer band — back cover bottom */
+  .disclaimer-band {
+    position: absolute !important;
+    bottom: 0 !important;
+    left: 0 !important;
+    right: 0 !important;
+    padding: 2.5mm 6mm !important;
+  }
+  .disclaimer-band p { font-size: 6pt !important; }
+}
+</style>
+
+<!-- Print structure: injected by JS before window.print() -->
+<div id="print-root" style="display:none"></div>
+
+</head>
+<body>
+
+<div class="mobile-msg">
+  <h2>Best viewed on desktop</h2>
+  <p>This interactive trifold brochure requires a wider screen. Please open on a desktop or tablet in landscape orientation.</p>
+</div>
+
+  <div class="page desktop-only">
+  <p class="brochure-label">Interactive Trifold · OneClassify · UST</p>
+
+  <!-- SCALE WRAPPER: sized to the post-scale dimensions so layout is correct -->
+  <div id="scale-wrap">
+    <!-- STAGE -->
+    <div class="stage" id="stage">
+
+    <!-- OUTSIDE SPREAD -->
+    <div class="spread" id="spread-outside" onclick="advance()" style="cursor:pointer;">
+
+      <!-- Panel A: Inside Flap (hidden, folded behind C in states 0-1) -->
+      <div class="panel" id="panel-a" data-panel="a">
+        <div class="eyebrow flap-eyebrow">At a glance · v3.8</div>
+        <div class="flap-title">Three voters. One verdict. Every decision auditable.</div>
+        <div class="flap-body">Hand-curated rules, an authoritative enterprise ontology, and a small ML model vote on every field. Disagreements are surfaced for review, never picked silently. Built for regulated data · 2026.</div>
+        <div class="stats-grid">
+          <div class="stat-row">
+            <div class="stat-value">99.5%</div>
+            <div class="stat-label">ML validation accuracy · macro-F1 94.8%</div>
+          </div>
+          <div class="stat-row">
+            <div class="stat-value">1,504</div>
+            <div class="stat-label">Curated rules · 7 sensitivity categories</div>
+          </div>
+          <div class="stat-row">
+            <div class="stat-value">100%</div>
+            <div class="stat-label">Regression suite pass · 7,975 fields</div>
+          </div>
+          <div class="stat-row">
+            <div class="stat-value">£0</div>
+            <div class="stat-label">Infrastructure · per-call · licence cost</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Panel B: Back Cover -->
+      <div class="panel" id="panel-b" data-panel="b">
+        <div class="eyebrow back-eyebrow">Aligned to six regulatory frameworks</div>
+        <div class="back-headline">Six frameworks.<br>One classifier.</div>
+        <div class="back-body">Every classification ties back to a specific rule, citing a specific regulatory framework. No black-box outputs. Audit-ready by construction.</div>
+        <ul class="framework-list">
+          <li>Enterprise Classification Matrix v4</li>
+          <li>Information Handling Procedure</li>
+          <li>PCI DSS v4.0</li>
+          <li>UK GDPR · DPA 2018</li>
+          <li>ICO Guidance</li>
+          <li>FCA Consumer Duty</li>
+        </ul>
+        <div style="flex:1"></div>
+        <div class="back-footer">
+          <div class="back-footer-left">
+            <div class="back-footer-brand">OneClassify</div>
+            <div class="back-footer-sub">Capability brochure · 2026</div>
+            <div class="back-footer-sub">Live demo available on request.</div>
+            <div class="back-footer-sub" style="margin-top:4px;color:var(--teal);">Created by Lijo George</div>
+          </div>
+          <div class="back-footer-logo">
+            <svg viewBox="101 76 453 502" xmlns="http://www.w3.org/2000/svg" height="32" width="auto">
+              <path fill="#231F20" d="M186.9,380c29,0,57.9,12.3,71.2,34.5l-31.5,25.5c-10.7-9.7-23.8-16.7-40-16.7c-17.6,0-26.1,7.2-26.1,13.8 c0,8.9,8.2,14,26.1,18.4l16.1,3.9c45.3,10.9,62,31.9,62,58.2c0,34.6-30.9,58.7-82.6,58.7c-28.9,0-64.5-12.1-78.3-37l31.5-25.5 c12.7,12.9,27.2,20.7,46.5,20.7c16.8,0,30.1-5.6,30.1-15.6c0-8.1-6.1-11.2-22.7-15.3l-16.9-4.2c-45.1-11.2-62.5-36.6-62.5-61.1 C109.9,406.8,137.9,380,186.9,380z M553.2,385.4v44.1H498v141.1h-51V429.5h-55.2v-44.1C391.8,385.4,553.2,385.4,553.2,385.4z M151.5,76.5v109.7c0,21.9,12.5,34.3,32.8,34.3c20.3,0,32.5-12.4,32.5-34.3V76.5h50.8V186c0,50.9-30.5,81.6-83,81.6 c-54.6,0-83.8-32-83.8-81.6V76.5H151.5z M508.5,131.4v71.9h-71.9v-71.9H508.5z"/>
+            </svg>
+          </div>
+        </div>
+        <div class="disclaimer-band">
+          <p>Confidential · For AI Expo Use Only</p>
+          <p>Sole property of UST · Prepared by the UST Capital One account · Not for external distribution · © 2026</p>
+        </div>
+      </div>
+
+      <!-- Panel C: Front Cover -->
+      <div class="panel" id="panel-c" data-panel="c">
+        <div class="cover-logos">
+          <div class="oc-mark">OC</div>
+          <div class="cover-logo-divider"></div>
+          <div class="cover-logo-ust">
+            <svg viewBox="101 76 453 502" xmlns="http://www.w3.org/2000/svg" height="30" width="auto">
+              <path fill="#FFFFFF" d="M186.9,380c29,0,57.9,12.3,71.2,34.5l-31.5,25.5c-10.7-9.7-23.8-16.7-40-16.7c-17.6,0-26.1,7.2-26.1,13.8 c0,8.9,8.2,14,26.1,18.4l16.1,3.9c45.3,10.9,62,31.9,62,58.2c0,34.6-30.9,58.7-82.6,58.7c-28.9,0-64.5-12.1-78.3-37l31.5-25.5 c12.7,12.9,27.2,20.7,46.5,20.7c16.8,0,30.1-5.6,30.1-15.6c0-8.1-6.1-11.2-22.7-15.3l-16.9-4.2c-45.1-11.2-62.5-36.6-62.5-61.1 C109.9,406.8,137.9,380,186.9,380z M553.2,385.4v44.1H498v141.1h-51V429.5h-55.2v-44.1C391.8,385.4,553.2,385.4,553.2,385.4z M151.5,76.5v109.7c0,21.9,12.5,34.3,32.8,34.3c20.3,0,32.5-12.4,32.5-34.3V76.5h50.8V186c0,50.9-30.5,81.6-83,81.6 c-54.6,0-83.8-32-83.8-81.6V76.5H151.5z M508.5,131.4v71.9h-71.9v-71.9H508.5z"/>
+            </svg>
+          </div>
+        </div>
+
+        <div style="flex:1"></div>
+
+        <div class="cover-title-block">
+          <div class="cover-supertitle">Field-Level Data Classification</div>
+          <div class="cover-product-name">OneClassify</div>
+          <div class="cover-tagline">Classification. Simplified.</div>
+        </div>
+
+        <div style="flex:0 0 18px"></div>
+
+        <div class="cover-desc">
+          Automated, auditable field classification for data shares. Runs entirely in the browser — no backend, no API calls, no data ever leaves the page. Three independent voters. Every decision traceable to a specific rule. An accelerator, not an authority.
+        </div>
+
+        <div style="flex:0 0 20px"></div>
+
+        <div class="cover-kpis">
+          <div class="cover-kpi"><span class="cover-kpi-v">1,504</span><span class="cover-kpi-l">Rules</span></div>
+          <div class="cover-kpi-sep"></div>
+          <div class="cover-kpi"><span class="cover-kpi-v">99.5%</span><span class="cover-kpi-l">ML Accuracy</span></div>
+          <div class="cover-kpi-sep"></div>
+          <div class="cover-kpi"><span class="cover-kpi-v">£0</span><span class="cover-kpi-l">Infrastructure</span></div>
+        </div>
+
+        <div style="flex:1"></div>
+
+        <div class="cover-footer">
+          <div class="cover-footer-left">Capability Brochure · 2026</div>
+          <div class="cover-ready-badge">Ready Today</div>
+        </div>
+
+        <div class="cover-pulse" id="cover-pulse">
+          <span>Click to open</span>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="9 18 15 12 9 6"/>
+          </svg>
+        </div>
+        <div class="fold-line"></div>
+      </div>
+
+    </div><!-- /spread-outside -->
+
+    <!-- INSIDE SPREAD -->
+    <div class="spread" id="spread-inside" onclick="advance()" style="cursor:pointer;">
+
+      <!-- Panel D: Problem & Solution -->
+      <div class="panel" id="panel-d" data-panel="d">
+        <div class="eyebrow d-eyebrow">The Problem</div>
+        <div class="panel-headline d-headline">Classification is the bottleneck on every new data share.</div>
+        <div class="section-spacer"></div>
+
+        <div class="problem-block">
+          <div class="block-label">Manual today</div>
+          <div class="block-text">Hours of analyst time per file. Months of effort for an entire classification exercise. Inconsistent across reviewers. Mistakes carry regulatory weight.</div>
+        </div>
+
+        <div class="problem-block">
+          <div class="block-label">Generic AI</div>
+          <div class="block-text">Per-call costs that don't scale. No regulatory citation per field — regulators want "this is PCI because rule X fired", not "the model said so".</div>
+        </div>
+
+        <div class="solution-block">
+          <div class="block-label">Our approach</div>
+          <div class="block-text">A small, fast, browser-based classifier purpose-built against established regulatory frameworks. Three voters reinforce each other. No data ever leaves the page.</div>
+        </div>
+
+        <ul class="value-list">
+          <li><strong>SSO-enabled</strong> — Secured via enterprise SSO. No separate login — access controlled through existing identity.</li>
+          <li><strong>Privacy by design</strong> — Runs entirely in-browser. CSP-enforced. Field names only — never the data.</li>
+          <li><strong>Exportable results</strong> — One-click Excel &amp; CSV export with classifier votes, confidence scores, and audit trail.</li>
+        </ul>
+        <div class="fold-line"></div>
+      </div>
+
+      <!-- Panel E: How It Works -->
+      <div class="panel" id="panel-e" data-panel="e">
+        <div class="eyebrow e-eyebrow">How It Works</div>
+        <div class="panel-headline e-headline">Three voters. One verdict.</div>
+        <div class="section-spacer"></div>
+
+        <div class="classifier-list">
+          <div class="classifier-card">
+            <div class="classifier-name">Rules</div>
+            <div class="classifier-desc">1,504 hand-curated patterns aligned to the Classification Matrix &amp; Information Handling Procedure</div>
+          </div>
+          <div class="classifier-card">
+            <div class="classifier-name">Ontology</div>
+            <div class="classifier-desc">39,000-field authoritative enterprise dictionary</div>
+          </div>
+          <div class="classifier-card">
+            <div class="classifier-name">ML Model</div>
+            <div class="classifier-desc">A small neural network (not an LLM) trained on 17,553 hand-labelled fields. 427 KB — runs in-browser. Sees only field names, never values. Abstains below 60% confidence so weak signals never override strong ones.</div>
+          </div>
+        </div>
+
+        <div class="flow-arrow">↓</div>
+
+        <div class="tally-block">
+          <div class="tally-title">Democratic Vote</div>
+          <div class="tally-desc">Majority wins · disagreements flagged · rules-override on PCI/HSHD when others abstain · 17,553 labelled training fields</div>
+        </div>
+
+        <div class="flow-arrow">↓</div>
+
+        <div class="output-block">
+          <div class="output-title">Field Classification</div>
+          <div class="output-cats">PCI · HSHD · Special | PII · Credit · Human · Consumer</div>
+          <div class="output-cats" style="font-size:7.5px;opacity:0.85;margin-top:2px;">+ Non-sensitive (voters agreed) · Needs Review (no confident vote)</div>
+        </div>
+
+        <div class="callout-box">
+          <div class="callout-title">What's new in v3.8</div>
+          <div class="callout-text">API payload coverage added · Rules 863 → 1,504 (+486 camelCase patterns) · ML retrained on 17,553 fields · accuracy 99.5% · macro-F1 94.8% · Test corpus 1,666 → 7,975 fields · 100% pass rate · Two-format Excel export: OneShare-ready &amp; UI mirror · Multi-label per-flag voting (v3.6)</div>
+        </div>
+        <div class="fold-line"></div>
+      </div>
+
+      <!-- Panel F: Results & Roadmap -->
+      <div class="panel" id="panel-f" data-panel="f">
+        <div class="eyebrow f-eyebrow">The Results · v3.8</div>
+        <div class="panel-headline f-headline">Measurable improvement.</div>
+        <div class="section-spacer"></div>
+
+        <table class="metric-table">
+          <tbody>
+            <tr><td>Curated rules</td><td>863 → 1,504</td></tr>
+            <tr><td>Training labels</td><td>4,264 → 17,553</td></tr>
+            <tr><td>ML accuracy</td><td>88.8% → 99.5%</td></tr>
+            <tr><td>Macro-F1</td><td>85.8% → 94.8%</td></tr>
+            <tr><td>Test corpus (fields)</td><td>1,666 → 7,975</td></tr>
+            <tr><td>Regression test pass</td><td>91.2% → 100%</td></tr>
+            <tr><td>API field accuracy</td><td>47% → 100%</td></tr>
+          </tbody>
+        </table>
+
+        <div class="accelerator-block">
+          <div class="accel-title">Accelerator. Blank page solved.</div>
+          <div class="accel-text">A defensible first pass — a pre-classified draft for every field. Every classification reviewed and validated by a human, with final guidance from the review panel before submission.</div>
+          <div class="accel-flow">
+            <span class="accel-step">Run</span>
+            <span class="accel-arrow">→</span>
+            <span class="accel-step">Review</span>
+            <span class="accel-arrow">→</span>
+            <span class="accel-step">Validate</span>
+            <span class="accel-arrow">→</span>
+            <span class="accel-step">Submit</span>
+          </div>
+        </div>
+
+        <div class="roadmap-list">
+          <div class="roadmap-item">
+            <div class="roadmap-num">1</div>
+            <div class="roadmap-content">
+              <div class="roadmap-item-title">Direct Codebase Integration</div>
+              <div class="roadmap-item-desc">Hook into source repositories to pull schemas at source — removes manual extraction pre-work.</div>
+            </div>
+          </div>
+          <div class="roadmap-item">
+            <div class="roadmap-num">2</div>
+            <div class="roadmap-content">
+              <div class="roadmap-item-title">Natural Language Input</div>
+              <div class="roadmap-item-desc">Ask in plain English and get an instant classification with the full vote breakdown.</div>
+            </div>
+          </div>
+          <div class="roadmap-item">
+            <div class="roadmap-num">3</div>
+            <div class="roadmap-content">
+              <div class="roadmap-item-title">Server-side API</div>
+              <div class="roadmap-item-desc">Scale as an internal API — classification at intake, not retrospective.</div>
+            </div>
+          </div>
+          <div class="roadmap-item">
+            <div class="roadmap-num">4</div>
+            <div class="roadmap-content">
+              <div class="roadmap-item-title">Reviewer Attestation Workflow</div>
+              <div class="roadmap-item-desc">Governance team formally signs off each classification — system of record for audit.</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="f-disclaimer">
+          Capability demo · UST · 2026<br>
+          Authoritative classification requires governance sign-off · Not for external distribution
+        </div>
+      </div>
+
+    </div><!-- /spread-inside -->
+
+  </div><!-- /stage -->
+  </div><!-- /scale-wrap -->
+
+</div><!-- /page -->
+
+<!-- NAV BAR -->
+<nav class="nav-bar desktop-only">
+  <!-- Left: Back -->
+  <div style="display:flex;align-items:center;flex:1;">
+    <button class="btn btn-ghost" id="btn-back" onclick="retreat()" disabled>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+        <polyline points="15 18 9 12 15 6"/>
+      </svg>
+      Back
+    </button>
+  </div>
+  <!-- Centre: dots + hint -->
+  <div style="display:flex;align-items:center;gap:10px;flex:1;justify-content:center;">
+    <div class="step-dots" id="step-dots-nav">
+      <div class="dot active" onclick="goToState(0)" title="Closed"></div>
+      <div class="dot" onclick="goToState(1)" title="Back cover"></div>
+      <div class="dot" onclick="goToState(2)" title="Outside open"></div>
+      <div class="dot" onclick="goToState(3)" title="Inside"></div>
+    </div>
+    <span class="nav-hint" id="nav-hint">← → arrow keys</span>
+  </div>
+  <!-- Right: Export PDF + Open -->
+  <div style="display:flex;gap:10px;align-items:center;flex:1;justify-content:flex-end;">
+    <button class="btn btn-ghost" onclick="printBrochure()" title="Export as PDF">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;">
+        <path d="M6 9V2h12v7"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/>
+        <rect x="6" y="14" width="12" height="8" rx="1"/>
+      </svg>
+      Export PDF
+    </button>
+    <button class="btn btn-primary" id="btn-advance" onclick="advance()">
+      Open
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+        <polyline points="9 18 15 12 9 6"/>
+      </svg>
+    </button>
+  </div>
+</nav>
+
+<script>
+// =============================================
+// STATE MACHINE
+// =============================================
+let state = 0; // 0=closed, 1=B unfolded, 2=A unfolded, 3=inside
+
+const stage = document.getElementById('stage');
+const spreadOutside = document.getElementById('spread-outside');
+const spreadInside = document.getElementById('spread-inside');
+const btnBack = document.getElementById('btn-back');
+const btnAdvance = document.getElementById('btn-advance');
+const dots = document.querySelectorAll('#step-dots-nav .dot');
+const navHintEl = document.getElementById('nav-hint');
+
+function applyState(s) {
+  state = s;
+
+  document.body.classList.remove('state-0', 'state-1', 'state-2', 'state-3');
+  document.body.classList.add('state-' + s);
+
+  // Dots
+  dots.forEach((d, i) => d.classList.toggle('active', i === s));
+
+  // Cover pulse — only in state 0
+  const coverPulse = document.getElementById('cover-pulse');
+  if (coverPulse) coverPulse.style.display = s === 0 ? 'flex' : 'none';
+
+  // Outside/inside spread visibility
+  if (s === 3) {
+    spreadOutside.classList.add('hidden');
+    spreadInside.classList.add('visible');
+  } else {
+    spreadOutside.classList.remove('hidden');
+    spreadInside.classList.remove('visible');
+  }
+
+  // Buttons
+  btnBack.disabled = s === 0;
+  if (s === 3) {
+    btnAdvance.innerHTML = 'Close <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>';
+    btnAdvance.onclick = () => goToState(0);
+  } else {
+    const labels = ['Open', 'Open More', 'See Inside'];
+    const arrow = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>';
+    btnAdvance.innerHTML = labels[s] + ' ' + arrow;
+    btnAdvance.onclick = advance;
+    btnAdvance.disabled = false;
+  }
+}
+
+function advance() {
+  if (state < 3) applyState(state + 1);
+  else goToState(0);
+}
+
+function retreat() {
+  if (state > 0) applyState(state - 1);
+}
+
+function goToState(s) {
+  applyState(s);
+}
+
+// Keyboard navigation
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
+    e.preventDefault();
+    advance();
+  } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+    e.preventDefault();
+    retreat();
+  }
+});
+
+// Init
+applyState(0);
+
+// =============================================
+// RESPONSIVE SCALING
+// =============================================
+// Panels are designed at 340×480px.
+// We scale the stage up/down to fill the viewport,
+// then size #scale-wrap to the post-scale dimensions
+// so the flex layout centres it correctly.
+
+const PANEL_W = 340;
+const PANEL_H = 680;
+
+function scaleStage() {
+  const navH = 72;
+  const padV = 80;
+  const padH = 64;
+
+  const availW = window.innerWidth  - padH;
+  const availH = window.innerHeight - navH - padV;
+
+  // How many panels are side-by-side right now
+  const cols = state === 0 ? 1 : 3;
+  const designW = PANEL_W * cols;
+  const designH = PANEL_H;
+
+  const scaleX = availW / designW;
+  const scaleY = availH / designH;
+  const scale  = Math.min(scaleX, scaleY, 2.0); // allow generous upscale
+
+  const stageEl = document.getElementById('stage');
+  const wrapEl  = document.getElementById('scale-wrap');
+
+  stageEl.style.transform = `scale(${scale})`;
+  stageEl.style.transformOrigin = 'top center';
+
+  // Wrapper: full available width so flex justify-content:center works,
+  // height = post-scale height so there's no gap below
+  wrapEl.style.width  = availW + 'px';
+  wrapEl.style.height = (PANEL_H * scale) + 'px';
+}
+
+window.addEventListener('resize', scaleStage);
+
+// Patch applyState to rescale after each transition
+const _applyState = applyState;
+applyState = function(s) {
+  _applyState(s);
+  // Wait for width transition then rescale
+  setTimeout(scaleStage, 50);
+  setTimeout(scaleStage, 650); // after transition completes
+};
+
+// Initial scale (after first applyState(0) has already run)
+requestAnimationFrame(scaleStage);
+
+// =============================================
+// PRINT / EXPORT PDF
+// =============================================
+function printBrochure() {
+  // Build two print-page divs in #print-root
+  // Page 1 outside: A (inside flap), B (back cover), C (front cover) — left to right
+  // Page 2 inside:  D (problem), E (how it works), F (results)
+  const root = document.getElementById('print-root');
+
+  // Clone panels fresh each time; keep data-panel attr so @media print CSS works
+  const panels = {};
+  ['a','b','c','d','e','f'].forEach(id => {
+    const clone = document.getElementById('panel-' + id).cloneNode(true);
+    clone.removeAttribute('id');          // avoid DOM ID conflicts
+    clone.setAttribute('data-panel', id); // CSS hook for backgrounds/colours
+    clone.style.cssText = '';             // remove interactive inline transforms
+    panels[id] = clone;
+  });
+
+  root.innerHTML = '';
+
+  // Page 1: outside trifold — left=A, mid=B, right=C
+  const p1 = document.createElement('div');
+  p1.className = 'print-page';
+  p1.appendChild(panels['a']);
+  p1.appendChild(panels['b']);
+  p1.appendChild(panels['c']);
+  root.appendChild(p1);
+
+  // Page 2: inside trifold — left=D, mid=E, right=F
+  const p2 = document.createElement('div');
+  p2.className = 'print-page';
+  p2.appendChild(panels['f']);
+  p2.appendChild(panels['e']);
+  p2.appendChild(panels['d']);
+  root.appendChild(p2);
+
+  root.style.display = 'block';
+
+  // Hide interactive content during print, restore after
+  const interactive = document.querySelector('.page.desktop-only');
+  interactive.style.display = 'none';
+
+  window.print();
+
+  // Restore after print dialog closes
+  setTimeout(() => {
+    interactive.style.display = '';
+    root.style.display = 'none';
+    root.innerHTML = '';
+  }, 500);
+}
+</script>
+</body>
+</html>
